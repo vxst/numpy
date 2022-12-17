@@ -102,12 +102,14 @@ def set_sig(sig):
     args = args.rpartition(")")[0]
     funcname = prefix.rpartition(" ")[-1]
     args = [arg.strip() for arg in args.split(",")]
-    FUNC_CALL_ARGS[funcname] = ", ".join("(%s) 0" % arg for arg in args)
+    # We use {0} because 0 alone cannot be cast to complex on MSVC in C:
+    FUNC_CALL_ARGS[funcname] = ", ".join("(%s){0}" % arg for arg in args)
 
 
 for file in [
     "feature_detection_locale.h",
     "feature_detection_math.h",
+    "feature_detection_cmath.h",
     "feature_detection_misc.h",
     "feature_detection_stdio.h",
 ]:
@@ -120,6 +122,8 @@ for file in [
             set_sig(line)
 
 # Mandatory functions: if not found, fail the build
+# Some of these can still be blocklisted if the C99 implementation
+# is buggy, see numpy/core/src/common/npy_config.h
 MANDATORY_FUNCS = [
     "sin", "cos", "tan", "sinh", "cosh", "tanh", "fabs",
     "floor", "ceil", "sqrt", "log10", "log", "exp", "asin",
@@ -128,6 +132,8 @@ MANDATORY_FUNCS = [
     "rint", "trunc", "exp2", 
     "copysign", "nextafter", "strtoll", "strtoull", "cbrt",
     "log2", "pow", "hypot", "atan2",
+    "csin", "csinh", "ccos", "ccosh", "ctan", "ctanh",
+    "creal", "cimag", "conj"
 ]
 
 OPTIONAL_LOCALE_FUNCS = ["strtold_l"]
@@ -147,8 +153,7 @@ C99_COMPLEX_TYPES = [
     ]
 C99_COMPLEX_FUNCS = [
     "cabs", "cacos", "cacosh", "carg", "casin", "casinh", "catan",
-    "catanh", "ccos", "ccosh", "cexp", "cimag", "clog", "conj", "cpow",
-    "cproj", "creal", "csin", "csinh", "csqrt", "ctan", "ctanh"
+    "catanh", "cexp", "clog", "cpow", "csqrt",
     ]
 
 OPTIONAL_HEADERS = [
@@ -206,15 +211,17 @@ OPTIONAL_FUNCTION_ATTRIBUTES = [('__attribute__((optimize("unroll-loops")))',
                                  'attribute_optimize_opt_2'),
                                 ('__attribute__((nonnull (1)))',
                                  'attribute_nonnull'),
-                                ('__attribute__((target ("avx")))',
-                                 'attribute_target_avx'),
-                                ('__attribute__((target ("avx2")))',
-                                 'attribute_target_avx2'),
-                                ('__attribute__((target ("avx512f")))',
-                                 'attribute_target_avx512f'),
-                                ('__attribute__((target ("avx512f,avx512dq,avx512bw,avx512vl,avx512cd")))',
-                                 'attribute_target_avx512_skx'),
                                 ]
+
+OPTIONAL_FUNCTION_ATTRIBUTES_AVX = [('__attribute__((target ("avx")))',
+    'attribute_target_avx'),
+    ('__attribute__((target ("avx2")))',
+    'attribute_target_avx2'),
+    ('__attribute__((target ("avx512f")))',
+    'attribute_target_avx512f'),
+    ('__attribute__((target ("avx512f,avx512dq,avx512bw,avx512vl,avx512cd")))',
+    'attribute_target_avx512_skx'),
+    ]
 
 # function attributes with intrinsics
 # To ensure your compiler can compile avx intrinsics with just the attributes
@@ -224,23 +231,24 @@ OPTIONAL_FUNCTION_ATTRIBUTES = [('__attribute__((optimize("unroll-loops")))',
 # The _mm512_castps_si512 instruction is specific check for AVX-512F support
 # in gcc-4.9 which is missing a subset of intrinsics. See
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61878
-OPTIONAL_FUNCTION_ATTRIBUTES_WITH_INTRINSICS = [('__attribute__((target("avx2,fma")))',
-                                'attribute_target_avx2_with_intrinsics',
-                                '__m256 temp = _mm256_set1_ps(1.0); temp = \
-                                _mm256_fmadd_ps(temp, temp, temp)',
-                                'immintrin.h'),
-                                ('__attribute__((target("avx512f")))',
-                                'attribute_target_avx512f_with_intrinsics',
-                                '__m512i temp = _mm512_castps_si512(_mm512_set1_ps(1.0))',
-                                'immintrin.h'),
-                                ('__attribute__((target ("avx512f,avx512dq,avx512bw,avx512vl,avx512cd")))',
-                                'attribute_target_avx512_skx_with_intrinsics',
-                                '__mmask8 temp = _mm512_fpclass_pd_mask(_mm512_set1_pd(1.0), 0x01);\
-                                __m512i unused_temp = \
-                                    _mm512_castps_si512(_mm512_set1_ps(1.0));\
-                                _mm_mask_storeu_epi8(NULL, 0xFF, _mm_broadcastmb_epi64(temp))',
-                                'immintrin.h'),
-                                ]
+OPTIONAL_FUNCTION_ATTRIBUTES_WITH_INTRINSICS_AVX = [
+    ('__attribute__((target("avx2,fma")))',
+    'attribute_target_avx2_with_intrinsics',
+    '__m256 temp = _mm256_set1_ps(1.0); temp = \
+    _mm256_fmadd_ps(temp, temp, temp)',
+    'immintrin.h'),
+    ('__attribute__((target("avx512f")))',
+    'attribute_target_avx512f_with_intrinsics',
+    '__m512i temp = _mm512_castps_si512(_mm512_set1_ps(1.0))',
+    'immintrin.h'),
+    ('__attribute__((target ("avx512f,avx512dq,avx512bw,avx512vl,avx512cd")))',
+    'attribute_target_avx512_skx_with_intrinsics',
+    '__mmask8 temp = _mm512_fpclass_pd_mask(_mm512_set1_pd(1.0), 0x01);\
+    __m512i unused_temp = \
+        _mm512_castps_si512(_mm512_set1_ps(1.0));\
+    _mm_mask_storeu_epi8(NULL, 0xFF, _mm_broadcastmb_epi64(temp))',
+    'immintrin.h'),
+    ]
 
 def fname2def(name):
     return "HAVE_%s" % name.upper()
