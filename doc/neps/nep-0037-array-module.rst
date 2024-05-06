@@ -7,9 +7,12 @@ NEP 37 — A dispatch protocol for NumPy-like modules
 :Author: Stephan Hoyer <shoyer@google.com>
 :Author: Hameer Abbasi
 :Author: Sebastian Berg
-:Status: Draft
+:Status: Superseded
+:Replaced-By: :ref:`NEP56`
 :Type: Standards Track
 :Created: 2019-12-29
+:Resolution: https://mail.python.org/archives/list/numpy-discussion@python.org/message/Z6AA5CL47NHBNEPTFWYOTSUVSRDGHYPN/
+
 
 Abstract
 --------
@@ -420,7 +423,7 @@ opt-in and would also allow for unambiguously overriding functions like
 ``asarray``, because ``np.api.asarray`` would always mean "convert an
 array-like object."  But it wouldn't solve all the dispatching needs met by
 ``__array_module__``, and would leave us with supporting a considerably more
-complex protocol both for array users and implementors.
+complex protocol both for array users and implementers.
 
 We could potentially implement such a new namespace *via* the
 ``__array_module__`` protocol. Certainly some users would find this convenient,

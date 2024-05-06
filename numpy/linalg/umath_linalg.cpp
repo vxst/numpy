@@ -11,8 +11,7 @@
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 #include "numpy/arrayobject.h"
 #include "numpy/ufuncobject.h"
-
-#include "npy_pycompat.h"
+#include "numpy/npy_math.h"
 
 #include "npy_config.h"
 
@@ -22,21 +21,19 @@
 #include <cstdio>
 #include <cassert>
 #include <cmath>
+#include <type_traits>
 #include <utility>
 
 
 static const char* umath_linalg_version_string = "0.1.5";
-
-struct scalar_trait {};
-struct complex_trait {};
-template<typename typ>
-using dispatch_scalar = typename std::conditional<std::is_scalar<typ>::value, scalar_trait, complex_trait>::type;
 
 /*
  ****************************************************************************
  *                        Debugging support                                 *
  ****************************************************************************
  */
+#define _UMATH_LINALG_DEBUG 0
+
 #define TRACE_TXT(...) do { fprintf (stderr, __VA_ARGS__); } while (0)
 #define STACK_TRACE do {} while (0)
 #define TRACE\
@@ -49,7 +46,7 @@ using dispatch_scalar = typename std::conditional<std::is_scalar<typ>::value, sc
         STACK_TRACE;                            \
     } while (0)
 
-#if 0
+#if _UMATH_LINALG_DEBUG
 #if defined HAVE_EXECINFO_H
 #include <execinfo.h>
 #elif defined HAVE_LIBUNWIND_H
@@ -470,16 +467,16 @@ const double numeric_limits<double>::nan = NPY_NAN;
 
 template<>
 struct numeric_limits<npy_cfloat> {
-static constexpr npy_cfloat one = {1.0f, 0.0f};
-static constexpr npy_cfloat zero = {0.0f, 0.0f};
-static constexpr npy_cfloat minus_one = {-1.0f, 0.0f};
+static constexpr npy_cfloat one = {1.0f};
+static constexpr npy_cfloat zero = {0.0f};
+static constexpr npy_cfloat minus_one = {-1.0f};
 static const npy_cfloat ninf;
 static const npy_cfloat nan;
 };
 constexpr npy_cfloat numeric_limits<npy_cfloat>::one;
 constexpr npy_cfloat numeric_limits<npy_cfloat>::zero;
 constexpr npy_cfloat numeric_limits<npy_cfloat>::minus_one;
-const npy_cfloat numeric_limits<npy_cfloat>::ninf = {-NPY_INFINITYF, 0.0f};
+const npy_cfloat numeric_limits<npy_cfloat>::ninf = {-NPY_INFINITYF};
 const npy_cfloat numeric_limits<npy_cfloat>::nan = {NPY_NANF, NPY_NANF};
 
 template<>
@@ -498,30 +495,30 @@ const f2c_complex numeric_limits<f2c_complex>::nan = {NPY_NANF, NPY_NANF};
 
 template<>
 struct numeric_limits<npy_cdouble> {
-static constexpr npy_cdouble one = {1.0, 0.0};
-static constexpr npy_cdouble zero = {0.0, 0.0};
-static constexpr npy_cdouble minus_one = {-1.0, 0.0};
+static constexpr npy_cdouble one = {1.0};
+static constexpr npy_cdouble zero = {0.0};
+static constexpr npy_cdouble minus_one = {-1.0};
 static const npy_cdouble ninf;
 static const npy_cdouble nan;
 };
 constexpr npy_cdouble numeric_limits<npy_cdouble>::one;
 constexpr npy_cdouble numeric_limits<npy_cdouble>::zero;
 constexpr npy_cdouble numeric_limits<npy_cdouble>::minus_one;
-const npy_cdouble numeric_limits<npy_cdouble>::ninf = {-NPY_INFINITY, 0.0};
+const npy_cdouble numeric_limits<npy_cdouble>::ninf = {-NPY_INFINITY};
 const npy_cdouble numeric_limits<npy_cdouble>::nan = {NPY_NAN, NPY_NAN};
 
 template<>
 struct numeric_limits<f2c_doublecomplex> {
-static constexpr f2c_doublecomplex one = {1.0, 0.0};
-static constexpr f2c_doublecomplex zero = {0.0, 0.0};
-static constexpr f2c_doublecomplex minus_one = {-1.0, 0.0};
+static constexpr f2c_doublecomplex one = {1.0};
+static constexpr f2c_doublecomplex zero = {0.0};
+static constexpr f2c_doublecomplex minus_one = {-1.0};
 static const f2c_doublecomplex ninf;
 static const f2c_doublecomplex nan;
 };
 constexpr f2c_doublecomplex numeric_limits<f2c_doublecomplex>::one;
 constexpr f2c_doublecomplex numeric_limits<f2c_doublecomplex>::zero;
 constexpr f2c_doublecomplex numeric_limits<f2c_doublecomplex>::minus_one;
-const f2c_doublecomplex numeric_limits<f2c_doublecomplex>::ninf = {-NPY_INFINITY, 0.0};
+const f2c_doublecomplex numeric_limits<f2c_doublecomplex>::ninf = {-NPY_INFINITY};
 const f2c_doublecomplex numeric_limits<f2c_doublecomplex>::nan = {NPY_NAN, NPY_NAN};
 
 /*
@@ -577,6 +574,7 @@ init_linearize_data(LINEARIZE_DATA_t *lin_data,
         lin_data, rows, columns, row_strides, column_strides, columns);
 }
 
+#if _UMATH_LINALG_DEBUG
 static inline void
 dump_ufunc_object(PyUFuncObject* ufunc)
 {
@@ -654,7 +652,7 @@ dump_matrix(const char* name,
         TRACE_TXT(" |\n");
     }
 }
-
+#endif
 
 /*
  *****************************************************************************
@@ -764,12 +762,6 @@ update_pointers(npy_uint8** bases, ptrdiff_t* offsets, size_t count)
 }
 
 
-/* disable -Wmaybe-uninitialized as there is some code that generate false
-   positives with this warning
-*/
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-
 /*
  *****************************************************************************
  **                             DISPATCHER FUNCS                            **
@@ -838,6 +830,12 @@ template<> struct basetype<f2c_complex> { using type = fortran_real;};
 template<> struct basetype<f2c_doublecomplex> { using type = fortran_doublereal;};
 template<typename T>
 using basetype_t = typename basetype<T>::type;
+
+struct scalar_trait {};
+struct complex_trait {};
+template<typename typ>
+using dispatch_scalar = typename std::conditional<sizeof(basetype_t<typ>) == sizeof(typ), scalar_trait, complex_trait>::type;
+
 
              /* rearranging of 2D matrices using blas */
 
@@ -974,7 +972,7 @@ identity_matrix(typ *matrix, size_t n)
 {
     size_t i;
     /* in IEEE floating point, zeroes are represented as bitwise 0 */
-    memset(matrix, 0, n*n*sizeof(typ));
+    memset((void *)matrix, 0, n*n*sizeof(typ));
 
     for (i = 0; i < n; ++i)
     {
@@ -982,23 +980,6 @@ identity_matrix(typ *matrix, size_t n)
         matrix += n+1;
     }
 }
-
-         /* lower/upper triangular matrix using blas (in place) */
-
-template<typename typ>
-static inline void
-triu_matrix(typ *matrix, size_t n)
-{
-    size_t i, j;
-    matrix += n;
-    for (i = 1; i < n; ++i) {
-        for (j = 0; j < i; ++j) {
-            matrix[j] = numeric_limits<typ>::zero;
-        }
-        matrix += n;
-    }
-}
-
 
 /* -------------------------------------------------------------------------- */
                           /* Determinants */
@@ -1045,8 +1026,26 @@ det_from_slogdet(typ sign, typ logdet)
 npy_float npyabs(npy_cfloat z) { return npy_cabsf(z);}
 npy_double npyabs(npy_cdouble z) { return npy_cabs(z);}
 
-#define RE(COMPLEX) (COMPLEX).real
-#define IM(COMPLEX) (COMPLEX).imag
+inline float RE(npy_cfloat *c) { return npy_crealf(*c); }
+inline double RE(npy_cdouble *c) { return npy_creal(*c); }
+#if NPY_SIZEOF_COMPLEX_LONGDOUBLE != NPY_SIZEOF_COMPLEX_DOUBLE
+inline longdouble_t RE(npy_clongdouble *c) { return npy_creall(*c); }
+#endif
+inline float IM(npy_cfloat *c) { return npy_cimagf(*c); }
+inline double IM(npy_cdouble *c) { return npy_cimag(*c); }
+#if NPY_SIZEOF_COMPLEX_LONGDOUBLE != NPY_SIZEOF_COMPLEX_DOUBLE
+inline longdouble_t IM(npy_clongdouble *c) { return npy_cimagl(*c); }
+#endif
+inline void SETRE(npy_cfloat *c, float real) { npy_csetrealf(c, real); }
+inline void SETRE(npy_cdouble *c, double real) { npy_csetreal(c, real); }
+#if NPY_SIZEOF_COMPLEX_LONGDOUBLE != NPY_SIZEOF_COMPLEX_DOUBLE
+inline void SETRE(npy_clongdouble *c, double real) { npy_csetreall(c, real); }
+#endif
+inline void SETIM(npy_cfloat *c, float real) { npy_csetimagf(c, real); }
+inline void SETIM(npy_cdouble *c, double real) { npy_csetimag(c, real); }
+#if NPY_SIZEOF_COMPLEX_LONGDOUBLE != NPY_SIZEOF_COMPLEX_DOUBLE
+inline void SETIM(npy_clongdouble *c, double real) { npy_csetimagl(c, real); }
+#endif
 
 template<typename typ>
 static inline typ
@@ -1054,8 +1053,8 @@ mult(typ op1, typ op2)
 {
     typ rv;
 
-    RE(rv) = RE(op1)*RE(op2) - IM(op1)*IM(op2);
-    IM(rv) = RE(op1)*IM(op2) + IM(op1)*RE(op2);
+    SETRE(&rv, RE(&op1)*RE(&op2) - IM(&op1)*IM(&op2));
+    SETIM(&rv, RE(&op1)*IM(&op2) + IM(&op1)*RE(&op2));
 
     return rv;
 }
@@ -1076,8 +1075,8 @@ slogdet_from_factored_diagonal(typ* src,
     {
         basetyp abs_element = npyabs(*src);
         typ sign_element;
-        RE(sign_element) = RE(*src) / abs_element;
-        IM(sign_element) = IM(*src) / abs_element;
+        SETRE(&sign_element, RE(src) / abs_element);
+        SETIM(&sign_element, IM(src) / abs_element);
 
         sign_acc = mult(sign_acc, sign_element);
         logdet_acc += npylog(abs_element);
@@ -1093,12 +1092,10 @@ static inline typ
 det_from_slogdet(typ sign, basetyp logdet)
 {
     typ tmp;
-    RE(tmp) = npyexp(logdet);
-    IM(tmp) = numeric_limits<basetyp>::zero;
+    SETRE(&tmp, npyexp(logdet));
+    SETIM(&tmp, numeric_limits<basetyp>::zero);
     return mult(sign, tmp);
 }
-#undef RE
-#undef IM
 
 
 /* As in the linalg package, the determinant is computed via LU factorization
@@ -1148,7 +1145,7 @@ slogdet(char **args,
                void *NPY_UNUSED(func))
 {
     fortran_int m;
-    npy_uint8 *tmp_buff = NULL;
+    char *tmp_buff = NULL;
     size_t matrix_size;
     size_t pivot_size;
     size_t safe_m;
@@ -1162,10 +1159,11 @@ slogdet(char **args,
      */
     INIT_OUTER_LOOP_3
     m = (fortran_int) dimensions[0];
-    safe_m = m;
+    /* avoid empty malloc (buffers likely unused) and ensure m is `size_t` */
+    safe_m = m != 0 ? m : 1;
     matrix_size = safe_m * safe_m * sizeof(typ);
     pivot_size = safe_m * sizeof(fortran_int);
-    tmp_buff = (npy_uint8 *)malloc(matrix_size + pivot_size);
+    tmp_buff = (char *)malloc(matrix_size + pivot_size);
 
     if (tmp_buff) {
         LINEARIZE_DATA_t lin_data;
@@ -1182,6 +1180,13 @@ slogdet(char **args,
 
         free(tmp_buff);
     }
+    else {
+        /* TODO: Requires use of new ufunc API to indicate error return */
+        NPY_ALLOW_C_API_DEF
+        NPY_ALLOW_C_API;
+        PyErr_NoMemory();
+        NPY_DISABLE_C_API;
+    }
 }
 
 template<typename typ, typename basetyp>
@@ -1192,7 +1197,7 @@ det(char **args,
            void *NPY_UNUSED(func))
 {
     fortran_int m;
-    npy_uint8 *tmp_buff;
+    char *tmp_buff;
     size_t matrix_size;
     size_t pivot_size;
     size_t safe_m;
@@ -1206,10 +1211,11 @@ det(char **args,
      */
     INIT_OUTER_LOOP_2
     m = (fortran_int) dimensions[0];
-    safe_m = m;
+    /* avoid empty malloc (buffers likely unused) and ensure m is `size_t` */
+    safe_m = m != 0 ? m : 1;
     matrix_size = safe_m * safe_m * sizeof(typ);
     pivot_size = safe_m * sizeof(fortran_int);
-    tmp_buff = (npy_uint8 *)malloc(matrix_size + pivot_size);
+    tmp_buff = (char *)malloc(matrix_size + pivot_size);
 
     if (tmp_buff) {
         LINEARIZE_DATA_t lin_data;
@@ -1229,6 +1235,13 @@ det(char **args,
         END_OUTER_LOOP
 
         free(tmp_buff);
+    }
+    else {
+        /* TODO: Requires use of new ufunc API to indicate error return */
+        NPY_ALLOW_C_API_DEF
+        NPY_ALLOW_C_API;
+        PyErr_NoMemory();
+        NPY_DISABLE_C_API;
     }
 }
 
@@ -1839,6 +1852,40 @@ struct POTR_PARAMS_t
 };
 
 
+         /* zero the undefined part in a upper/lower triangular matrix */
+          /* Note: matrix from fortran routine, so column-major order */
+
+template<typename typ>
+static inline void
+zero_lower_triangle(POTR_PARAMS_t<typ> *params)
+{
+    fortran_int n = params->N;
+    typ *matrix = params->A;
+    fortran_int i, j;
+    for (i = 0; i < n-1; ++i) {
+        for (j = i+1; j < n; ++j) {
+            matrix[j] = numeric_limits<typ>::zero;
+        }
+        matrix += n;
+    }
+}
+
+template<typename typ>
+static inline void
+zero_upper_triangle(POTR_PARAMS_t<typ> *params)
+{
+    fortran_int n = params->N;
+    typ *matrix = params->A;
+    fortran_int i, j;
+    matrix += n;
+    for (i = 1; i < n; ++i) {
+        for (j = 0; j < i; ++j) {
+            matrix[j] = numeric_limits<typ>::zero;
+        }
+        matrix += n;
+    }
+}
+
 static inline fortran_int
 call_potrf(POTR_PARAMS_t<fortran_real> *params)
 {
@@ -1927,8 +1974,6 @@ cholesky(char uplo, char **args, npy_intp const *dimensions, npy_intp const *ste
     fortran_int n;
     INIT_OUTER_LOOP_2
 
-    assert(uplo == 'L');
-
     n = (fortran_int)dimensions[0];
     if (init_potrf(&params, uplo, n)) {
         LINEARIZE_DATA_t a_in, r_out;
@@ -1939,7 +1984,12 @@ cholesky(char uplo, char **args, npy_intp const *dimensions, npy_intp const *ste
             linearize_matrix(params.A, (ftyp*)args[0], &a_in);
             not_ok = call_potrf(&params);
             if (!not_ok) {
-                triu_matrix(params.A, params.N);
+                if (uplo == 'L') {
+                    zero_upper_triangle(&params);
+                }
+                else {
+                    zero_lower_triangle(&params);
+                }
                 delinearize_matrix((ftyp*)args[1], params.A, &r_out);
             } else {
                 error_occurred = 1;
@@ -1958,6 +2008,14 @@ cholesky_lo(char **args, npy_intp const *dimensions, npy_intp const *steps,
                 void *NPY_UNUSED(func))
 {
     cholesky<typ>('L', args, dimensions, steps);
+}
+
+template<typename typ>
+static void
+cholesky_up(char **args, npy_intp const *dimensions, npy_intp const *steps,
+                void *NPY_UNUSED(func))
+{
+    cholesky<typ>('U', args, dimensions, steps);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2242,7 +2300,7 @@ process_geev_results(GEEV_PARAMS_t<typ> *params, scalar_trait)
     }
 }
 
-
+#if 0
 static inline fortran_int
 call_geev(GEEV_PARAMS_t<fortran_complex>* params)
 {
@@ -2258,6 +2316,8 @@ call_geev(GEEV_PARAMS_t<fortran_complex>* params)
                           &rv);
     return rv;
 }
+#endif
+
 static inline fortran_int
 call_geev(GEEV_PARAMS_t<fortran_doublecomplex>* params)
 {
@@ -2891,7 +2951,7 @@ using basetyp = basetype_t<typ>;
                    (fortran_int)dimensions[0],
                    (fortran_int)dimensions[1],
 dispatch_scalar<typ>())) {
-        LINEARIZE_DATA_t a_in, u_out, s_out, v_out;
+        LINEARIZE_DATA_t a_in, u_out = {}, s_out = {}, v_out = {};
         fortran_int min_m_n = params.M < params.N ? params.M : params.N;
 
         init_linearize_data(&a_in, params.N, params.M, steps[1], steps[0]);
@@ -3260,7 +3320,7 @@ using ftyp = fortran_type_t<typ>;
 
 
 /* -------------------------------------------------------------------------- */
-                 /* qr common code (modes - reduced and complete) */ 
+                 /* qr common code (modes - reduced and complete) */
 
 template<typename typ>
 struct GQR_PARAMS_t
@@ -3497,7 +3557,7 @@ init_gqr(GQR_PARAMS_t<ftyp> *params,
                    fortran_int n)
 {
     return init_gqr_common(
-        params, m, n, 
+        params, m, n,
         fortran_int_min(m, n));
 }
 
@@ -3737,15 +3797,15 @@ scalar_trait)
     fortran_int lda = fortran_int_max(1, m);
     fortran_int ldb = fortran_int_max(1, fortran_int_max(m,n));
 
-    mem_buff = (npy_uint8 *)malloc(a_size + b_size + s_size);
+    size_t msize = a_size + b_size + s_size;
+    mem_buff = (npy_uint8 *)malloc(msize != 0 ? msize : 1);
 
-    if (!mem_buff)
-        goto error;
-
+    if (!mem_buff) {
+        goto no_memory;
+    }
     a = mem_buff;
     b = a + a_size;
     s = b + b_size;
-
 
     params->M = m;
     params->N = n;
@@ -3766,9 +3826,9 @@ scalar_trait)
         params->RWORK = NULL;
         params->LWORK = -1;
 
-        if (call_gelsd(params) != 0)
+        if (call_gelsd(params) != 0) {
             goto error;
-
+        }
         work_count = (fortran_int)work_size_query;
 
         work_size  = (size_t) work_size_query * sizeof(ftyp);
@@ -3776,9 +3836,9 @@ scalar_trait)
     }
 
     mem_buff2 = (npy_uint8 *)malloc(work_size + iwork_size);
-    if (!mem_buff2)
-        goto error;
-
+    if (!mem_buff2) {
+        goto no_memory;
+    }
     work = mem_buff2;
     iwork = work + work_size;
 
@@ -3788,12 +3848,18 @@ scalar_trait)
     params->LWORK = work_count;
 
     return 1;
+
+ no_memory:
+    NPY_ALLOW_C_API_DEF
+    NPY_ALLOW_C_API;
+    PyErr_NoMemory();
+    NPY_DISABLE_C_API;
+
  error:
     TRACE_TXT("%s failed init\n", __FUNCTION__);
     free(mem_buff);
     free(mem_buff2);
     memset(params, 0, sizeof(*params));
-
     return 0;
 }
 
@@ -3857,15 +3923,16 @@ using frealtyp = basetype_t<ftyp>;
     fortran_int lda = fortran_int_max(1, m);
     fortran_int ldb = fortran_int_max(1, fortran_int_max(m,n));
 
-    mem_buff = (npy_uint8 *)malloc(a_size + b_size + s_size);
+    size_t msize = a_size + b_size + s_size;
+    mem_buff = (npy_uint8 *)malloc(msize != 0 ? msize : 1);
 
-    if (!mem_buff)
-        goto error;
+    if (!mem_buff) {
+        goto no_memory;
+    }
 
     a = mem_buff;
     b = a + a_size;
     s = b + b_size;
-
 
     params->M = m;
     params->N = n;
@@ -3887,8 +3954,9 @@ using frealtyp = basetype_t<ftyp>;
         params->RWORK = &rwork_size_query;
         params->LWORK = -1;
 
-        if (call_gelsd(params) != 0)
+        if (call_gelsd(params) != 0) {
             goto error;
+        }
 
         work_count = (fortran_int)work_size_query.r;
 
@@ -3898,8 +3966,9 @@ using frealtyp = basetype_t<ftyp>;
     }
 
     mem_buff2 = (npy_uint8 *)malloc(work_size + rwork_size + iwork_size);
-    if (!mem_buff2)
-        goto error;
+    if (!mem_buff2) {
+        goto no_memory;
+    }
 
     work = mem_buff2;
     rwork = work + work_size;
@@ -3911,6 +3980,13 @@ using frealtyp = basetype_t<ftyp>;
     params->LWORK = work_count;
 
     return 1;
+
+ no_memory:
+    NPY_ALLOW_C_API_DEF
+    NPY_ALLOW_C_API;
+    PyErr_NoMemory();
+    NPY_DISABLE_C_API;
+
  error:
     TRACE_TXT("%s failed init\n", __FUNCTION__);
     free(mem_buff);
@@ -3949,7 +4025,7 @@ abs2(typ *p, npy_intp n, complex_trait) {
     basetype_t<typ> res = 0;
     for (i = 0; i < n; i++) {
         typ el = p[i];
-        res += el.real*el.real + el.imag*el.imag;
+        res += RE(&el)*RE(&el) + IM(&el)*IM(&el);
     }
     return res;
 }
@@ -4029,8 +4105,6 @@ dispatch_scalar<typ>{});
 
     set_fp_invalid_or_clear(error_occurred);
 }
-
-#pragma GCC diagnostic pop
 
 /* -------------------------------------------------------------------------- */
               /* gufunc registration  */
@@ -4130,6 +4204,7 @@ GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(solve);
 GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(solve1);
 GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(inv);
 GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(cholesky_lo);
+GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(cholesky_up);
 GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(svd_N);
 GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(svd_S);
 GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(svd_A);
@@ -4140,14 +4215,14 @@ GUFUNC_FUNC_ARRAY_REAL_COMPLEX__(lstsq);
 GUFUNC_FUNC_ARRAY_EIG(eig);
 GUFUNC_FUNC_ARRAY_EIG(eigvals);
 
-static char equal_2_types[] = {
+static const char equal_2_types[] = {
     NPY_FLOAT, NPY_FLOAT,
     NPY_DOUBLE, NPY_DOUBLE,
     NPY_CFLOAT, NPY_CFLOAT,
     NPY_CDOUBLE, NPY_CDOUBLE
 };
 
-static char equal_3_types[] = {
+static const char equal_3_types[] = {
     NPY_FLOAT, NPY_FLOAT, NPY_FLOAT,
     NPY_DOUBLE, NPY_DOUBLE, NPY_DOUBLE,
     NPY_CFLOAT, NPY_CFLOAT, NPY_CFLOAT,
@@ -4155,47 +4230,47 @@ static char equal_3_types[] = {
 };
 
 /* second result is logdet, that will always be a REAL */
-static char slogdet_types[] = {
+static const char slogdet_types[] = {
     NPY_FLOAT, NPY_FLOAT, NPY_FLOAT,
     NPY_DOUBLE, NPY_DOUBLE, NPY_DOUBLE,
     NPY_CFLOAT, NPY_CFLOAT, NPY_FLOAT,
     NPY_CDOUBLE, NPY_CDOUBLE, NPY_DOUBLE
 };
 
-static char eigh_types[] = {
+static const char eigh_types[] = {
     NPY_FLOAT, NPY_FLOAT, NPY_FLOAT,
     NPY_DOUBLE, NPY_DOUBLE, NPY_DOUBLE,
     NPY_CFLOAT, NPY_FLOAT, NPY_CFLOAT,
     NPY_CDOUBLE, NPY_DOUBLE, NPY_CDOUBLE
 };
 
-static char eighvals_types[] = {
+static const char eighvals_types[] = {
     NPY_FLOAT, NPY_FLOAT,
     NPY_DOUBLE, NPY_DOUBLE,
     NPY_CFLOAT, NPY_FLOAT,
     NPY_CDOUBLE, NPY_DOUBLE
 };
 
-static char eig_types[] = {
+static const char eig_types[] = {
     NPY_FLOAT, NPY_CFLOAT, NPY_CFLOAT,
     NPY_DOUBLE, NPY_CDOUBLE, NPY_CDOUBLE,
     NPY_CDOUBLE, NPY_CDOUBLE, NPY_CDOUBLE
 };
 
-static char eigvals_types[] = {
+static const char eigvals_types[] = {
     NPY_FLOAT, NPY_CFLOAT,
     NPY_DOUBLE, NPY_CDOUBLE,
     NPY_CDOUBLE, NPY_CDOUBLE
 };
 
-static char svd_1_1_types[] = {
+static const char svd_1_1_types[] = {
     NPY_FLOAT, NPY_FLOAT,
     NPY_DOUBLE, NPY_DOUBLE,
     NPY_CFLOAT, NPY_FLOAT,
     NPY_CDOUBLE, NPY_DOUBLE
 };
 
-static char svd_1_3_types[] = {
+static const char svd_1_3_types[] = {
     NPY_FLOAT,   NPY_FLOAT,   NPY_FLOAT,  NPY_FLOAT,
     NPY_DOUBLE,  NPY_DOUBLE,  NPY_DOUBLE, NPY_DOUBLE,
     NPY_CFLOAT,  NPY_CFLOAT,  NPY_FLOAT,  NPY_CFLOAT,
@@ -4203,25 +4278,25 @@ static char svd_1_3_types[] = {
 };
 
 /* A, tau */
-static char qr_r_raw_types[] = {
+static const char qr_r_raw_types[] = {
     NPY_DOUBLE,  NPY_DOUBLE,
     NPY_CDOUBLE, NPY_CDOUBLE,
 };
 
 /* A, tau, q */
-static char qr_reduced_types[] = {
+static const char qr_reduced_types[] = {
     NPY_DOUBLE,  NPY_DOUBLE,  NPY_DOUBLE,
     NPY_CDOUBLE, NPY_CDOUBLE, NPY_CDOUBLE,
 };
 
 /* A, tau, q */
-static char qr_complete_types[] = {
+static const char qr_complete_types[] = {
     NPY_DOUBLE,  NPY_DOUBLE,  NPY_DOUBLE,
     NPY_CDOUBLE, NPY_CDOUBLE, NPY_CDOUBLE,
 };
 
 /*  A,           b,           rcond,      x,           resid,      rank,    s,        */
-static char lstsq_types[] = {
+static const char lstsq_types[] = {
     NPY_FLOAT,   NPY_FLOAT,   NPY_FLOAT,  NPY_FLOAT,   NPY_FLOAT,  NPY_INT, NPY_FLOAT,
     NPY_DOUBLE,  NPY_DOUBLE,  NPY_DOUBLE, NPY_DOUBLE,  NPY_DOUBLE, NPY_INT, NPY_DOUBLE,
     NPY_CFLOAT,  NPY_CFLOAT,  NPY_FLOAT,  NPY_CFLOAT,  NPY_FLOAT,  NPY_INT, NPY_FLOAT,
@@ -4236,7 +4311,7 @@ typedef struct gufunc_descriptor_struct {
     int nin;
     int nout;
     PyUFuncGenericFunction *funcs;
-    char *types;
+    const char *types;
 } GUFUNC_DESCRIPTOR_t;
 
 GUFUNC_DESCRIPTOR_t gufunc_descriptors [] = {
@@ -4344,11 +4419,21 @@ GUFUNC_DESCRIPTOR_t gufunc_descriptors [] = {
     {
         "cholesky_lo",
         "(m,m)->(m,m)",
-        "cholesky decomposition of hermitian positive-definite matrices. \n"\
-        "Broadcast to all outer dimensions. \n"\
-        "    \"(m,m)->(m,m)\" \n",
+        "cholesky decomposition of hermitian positive-definite matrices,\n"\
+        "using lower triangle. Broadcast to all outer dimensions.\n"\
+        "    \"(m,m)->(m,m)\"\n",
         4, 1, 1,
         FUNC_ARRAY_NAME(cholesky_lo),
+        equal_2_types
+    },
+    {
+        "cholesky_up",
+        "(m,m)->(m,m)",
+        "cholesky decomposition of hermitian positive-definite matrices,\n"\
+        "using upper triangle. Broadcast to all outer dimensions.\n"\
+        "    \"(m,m)->(m,m)\"\n",
+        4, 1, 1,
+        FUNC_ARRAY_NAME(cholesky_up),
         equal_2_types
     },
     {
@@ -4497,7 +4582,7 @@ addUfuncs(PyObject *dictionary) {
         if (f == NULL) {
             return -1;
         }
-#if 0
+#if _UMATH_LINALG_DEBUG
         dump_ufunc_object((PyUFuncObject*) f);
 #endif
         int ret = PyDict_SetItemString(dictionary, d->name, f);
@@ -4563,6 +4648,12 @@ PyMODINIT_FUNC PyInit__umath_linalg(void)
     if (addUfuncs(d) < 0) {
         return NULL;
     }
+
+#ifdef HAVE_BLAS_ILP64
+    PyDict_SetItemString(d, "_ilp64", Py_True);
+#else
+    PyDict_SetItemString(d, "_ilp64", Py_False);
+#endif
 
     return m;
 }
